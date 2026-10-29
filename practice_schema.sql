@@ -1,0 +1,581 @@
+-- ==============================================================================
+-- CAMPUS GUIDANCE ASSISTANT (CGA) - PRACTICE & PLACEMENT MODULE SCHEMA
+-- ==============================================================================
+-- Comprehensive SQL schema and seed data for Practice Problems, Speed Quizzes,
+-- Interview Prep, and Student Portfolios.
+-- ==============================================================================
+
+-- 0. Ensure profiles table has XP column
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS xp INTEGER DEFAULT 0;
+
+-- 1. Practice Problems Table (Global catalog)
+CREATE TABLE IF NOT EXISTS public.practice_problems (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('Coding', 'Aptitude', 'Technical', 'Interview')),
+    difficulty TEXT NOT NULL DEFAULT 'Medium' CHECK (difficulty IN ('Easy', 'Medium', 'Hard')),
+    description TEXT NOT NULL,
+    career_id TEXT,
+    topic TEXT,
+    xp_reward INTEGER NOT NULL DEFAULT 20,
+    example_input TEXT,
+    example_output TEXT,
+    explanation TEXT,
+    constraints TEXT,
+    hint TEXT,
+    options JSONB NOT NULL DEFAULT '[]'::jsonb,
+    correct_index INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 2. User Problem Progress (Per-user solved tracking with composite unique constraint)
+CREATE TABLE IF NOT EXISTS public.user_problem_progress (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    problem_id TEXT NOT NULL REFERENCES public.practice_problems(id) ON DELETE CASCADE,
+    is_solved BOOLEAN NOT NULL DEFAULT true,
+    solved_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT uq_user_problem UNIQUE (user_id, problem_id)
+);
+
+-- 3. Speed Placement Quiz Questions (Global question bank)
+CREATE TABLE IF NOT EXISTS public.quiz_questions (
+    id TEXT PRIMARY KEY,
+    career_id TEXT,
+    topic TEXT,
+    question TEXT NOT NULL,
+    options JSONB NOT NULL DEFAULT '[]'::jsonb,
+    correct_index INTEGER NOT NULL DEFAULT 0,
+    explanation TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 4. User Quiz Attempts (Per-user test submissions & history)
+CREATE TABLE IF NOT EXISTS public.quiz_attempts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    career_id TEXT,
+    topic TEXT NOT NULL DEFAULT 'general',
+    score INTEGER NOT NULL DEFAULT 0,
+    total_questions INTEGER NOT NULL DEFAULT 5,
+    xp_earned INTEGER NOT NULL DEFAULT 0,
+    completed_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 5. Interview Questions (Global bank)
+CREATE TABLE IF NOT EXISTS public.interview_questions (
+    id TEXT PRIMARY KEY,
+    career_id TEXT,
+    category TEXT NOT NULL DEFAULT 'Technical',
+    question TEXT NOT NULL,
+    answer_key TEXT NOT NULL,
+    tip TEXT NOT NULL,
+    topic TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 6. Student Portfolio Projects
+CREATE TABLE IF NOT EXISTS public.student_projects (
+    id TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    tech_stack JSONB NOT NULL DEFAULT '[]'::jsonb,
+    github_url TEXT NOT NULL DEFAULT '',
+    live_demo_url TEXT,
+    stars INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- ==============================================================================
+-- INDEXES FOR QUERY OPTIMIZATION
+-- ==============================================================================
+CREATE INDEX IF NOT EXISTS idx_practice_problems_career ON public.practice_problems(career_id);
+CREATE INDEX IF NOT EXISTS idx_user_problem_progress_user ON public.user_problem_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_questions_career ON public.quiz_questions(career_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user ON public.quiz_attempts(user_id);
+CREATE INDEX IF NOT EXISTS idx_student_projects_user ON public.student_projects(user_id);
+
+-- ==============================================================================
+-- ROW LEVEL SECURITY (RLS) POLICIES
+-- ==============================================================================
+
+-- Enable RLS on all tables
+ALTER TABLE public.practice_problems ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_problem_progress ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.quiz_questions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.quiz_attempts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.interview_questions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.student_projects ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies if re-running
+DROP POLICY IF EXISTS "practice_problems_read_all" ON public.practice_problems;
+DROP POLICY IF EXISTS "quiz_questions_read_all" ON public.quiz_questions;
+DROP POLICY IF EXISTS "interview_questions_read_all" ON public.interview_questions;
+
+DROP POLICY IF EXISTS "user_problem_progress_select_own" ON public.user_problem_progress;
+DROP POLICY IF EXISTS "user_problem_progress_insert_own" ON public.user_problem_progress;
+DROP POLICY IF EXISTS "user_problem_progress_update_own" ON public.user_problem_progress;
+DROP POLICY IF EXISTS "user_problem_progress_delete_own" ON public.user_problem_progress;
+
+DROP POLICY IF EXISTS "quiz_attempts_select_own" ON public.quiz_attempts;
+DROP POLICY IF EXISTS "quiz_attempts_insert_own" ON public.quiz_attempts;
+
+DROP POLICY IF EXISTS "student_projects_select_own" ON public.student_projects;
+DROP POLICY IF EXISTS "student_projects_insert_own" ON public.student_projects;
+DROP POLICY IF EXISTS "student_projects_update_own" ON public.student_projects;
+DROP POLICY IF EXISTS "student_projects_delete_own" ON public.student_projects;
+
+-- Public/Authenticated READ access for global content
+CREATE POLICY "practice_problems_read_all" ON public.practice_problems
+    FOR SELECT TO authenticated, anon USING (true);
+
+CREATE POLICY "quiz_questions_read_all" ON public.quiz_questions
+    FOR SELECT TO authenticated, anon USING (true);
+
+CREATE POLICY "interview_questions_read_all" ON public.interview_questions
+    FOR SELECT TO authenticated, anon USING (true);
+
+-- User-isolated access for user_problem_progress
+CREATE POLICY "user_problem_progress_select_own" ON public.user_problem_progress
+    FOR SELECT TO authenticated USING (auth.uid() = user_id);
+
+CREATE POLICY "user_problem_progress_insert_own" ON public.user_problem_progress
+    FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "user_problem_progress_update_own" ON public.user_problem_progress
+    FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "user_problem_progress_delete_own" ON public.user_problem_progress
+    FOR DELETE TO authenticated USING (auth.uid() = user_id);
+
+-- User-isolated access for quiz_attempts
+CREATE POLICY "quiz_attempts_select_own" ON public.quiz_attempts
+    FOR SELECT TO authenticated USING (auth.uid() = user_id);
+
+CREATE POLICY "quiz_attempts_insert_own" ON public.quiz_attempts
+    FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+
+-- User-isolated access for student_projects
+CREATE POLICY "student_projects_select_own" ON public.student_projects
+    FOR SELECT TO authenticated USING (auth.uid() = user_id);
+
+CREATE POLICY "student_projects_insert_own" ON public.student_projects
+    FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "student_projects_update_own" ON public.student_projects
+    FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "student_projects_delete_own" ON public.student_projects
+    FOR DELETE TO authenticated USING (auth.uid() = user_id);
+
+-- Explicit table grants for public content
+GRANT SELECT ON public.practice_problems TO anon, authenticated;
+GRANT SELECT ON public.quiz_questions TO anon, authenticated;
+GRANT SELECT ON public.interview_questions TO anon, authenticated;
+GRANT SELECT ON public.roadmaps TO anon, authenticated;
+GRANT SELECT ON public.roadmap_stages TO anon, authenticated;
+GRANT SELECT ON public.roadmap_tasks TO anon, authenticated;
+GRANT ALL ON public.user_task_progress TO authenticated;
+
+-- ==============================================================================
+-- SEED DATA: PRACTICE PROBLEMS
+-- ==============================================================================
+INSERT INTO public.practice_problems (id, title, category, difficulty, description, career_id, topic, xp_reward) VALUES
+
+-- === SOFTWARE DEVELOPER (software_dev) ===
+('dsa_01', 'Two Sum & Hash Map Lookup', 'Coding', 'Easy', 'Given an array of integers and a target sum, return indices of two numbers that add up to target in O(N) time using a hash table.', 'software_dev', 'Arrays & Hashing', 20),
+('dsa_02', 'Reverse a Singly Linked List', 'Coding', 'Easy', 'Implement pointer manipulation to reverse a singly linked list iteratively and recursively in O(N) time and O(1) space.', 'software_dev', 'Linked Lists', 20),
+('dsa_03', 'Longest Substring Without Repeating Characters', 'Coding', 'Medium', 'Use the sliding window technique with dynamic frequency map to find the length of the longest distinct substring in O(N) time.', 'software_dev', 'Sliding Window', 20),
+('dsa_04', 'Binary Tree Level Order Traversal', 'Coding', 'Medium', 'Perform Breadth-First Search (BFS) using a FIFO queue to group node values by their tree depth level.', 'software_dev', 'Trees & Graphs', 20),
+('dsa_05', 'Climbing Stairs (Dynamic Programming)', 'Coding', 'Easy', 'Calculate the distinct ways to reach the top of an N-step staircase taking 1 or 2 steps using Fibonacci state memoization.', 'software_dev', 'Dynamic Programming', 20),
+
+-- === AI / MACHINE LEARNING ENGINEER (aiml_engineer) ===
+('aiml_01', 'Vector Dot Product & Cosine Similarity', 'Coding', 'Easy', 'Compute cosine similarity between high-dimensional embedding vectors for semantic search ranking without numerical overflow.', 'aiml_engineer', 'Linear Algebra & Embeddings', 20),
+('aiml_02', 'Cross-Entropy Loss & Softmax Computation', 'Technical', 'Medium', 'Implement numerically stable multi-class softmax and categorical cross-entropy loss gradients for neural network backpropagation.', 'aiml_engineer', 'Deep Learning Fundamentals', 20),
+('aiml_03', 'K-Means Clustering Convergence', 'Coding', 'Medium', 'Implement centroid initialization, Euclidean assignment, and mean recalculation until centroid drift satisfies epsilon tolerance.', 'aiml_engineer', 'Unsupervised Learning', 20),
+('aiml_04', 'Convolution Output Dimensions & Weight Sizing', 'Technical', 'Easy', 'Calculate spatial feature map output dimensions (H_out, W_out) and total trainable parameter count given input volume, kernel size, stride, and padding.', 'aiml_engineer', 'Computer Vision & CNNs', 20),
+('aiml_05', 'Precision-Recall Curve & Threshold Optimization', 'Technical', 'Medium', 'Analyze confusion matrix trade-offs under severe class imbalance to select the optimal classification threshold balancing false positives and false negatives.', 'aiml_engineer', 'Model Evaluation', 20),
+
+-- === DATA SCIENTIST (data_scientist) ===
+('data_03', 'Hypothesis Testing & A/B Test Power Calculation', 'Technical', 'Hard', 'Calculate minimum sample size and critical p-value rejection region for a two-sample binomial conversion rate test.', 'data_scientist', 'Inferential Statistics', 20),
+('ds_01', 'Linear Regression: Normal Equation vs Gradient Descent', 'Technical', 'Medium', 'Derive the closed-form ordinary least squares solution (X^T X)^(-1) X^T y and analyze computational trade-offs against iterative batch gradient descent.', 'data_scientist', 'Statistical Modeling', 20),
+('ds_02', 'Principal Component Analysis (PCA) & Variance Ratio', 'Coding', 'Medium', 'Compute the sample covariance matrix, extract eigenvalues, and select the minimum number of principal components retaining 95% cumulative explained variance.', 'data_scientist', 'Dimensionality Reduction', 20),
+('ds_03', 'Feature Scaling: Standardization vs Min-Max Normalization', 'Technical', 'Easy', 'Formulate appropriate feature transformation strategies preventing data leakage across train and validation splits in distance-based vs tree-based models.', 'data_scientist', 'Feature Engineering', 20),
+('ds_04', 'Random Forest Out-of-Bag (OOB) Error & Feature Importance', 'Technical', 'Medium', 'Calculate Gini impurity decrease across decision trees and evaluate Out-of-Bag (OOB) error as an unbiased validation estimator without separate holdout sets.', 'data_scientist', 'Ensemble Methods', 20),
+
+-- === DATA ANALYST (data_analyst) ===
+('data_01', 'SQL Window Functions: Top N Sales per Region', 'Technical', 'Medium', 'Write SQL queries utilizing DENSE_RANK() and PARTITION BY to extract top quartile revenue performers across organizational regions.', 'data_analyst', 'SQL & Query Optimization', 20),
+('data_02', 'Missing Value Imputation & Outlier Detection', 'Technical', 'Easy', 'Formulate strategies for handling right-skewed tabular data using IQR thresholds versus z-score standardization.', 'data_analyst', 'Data Wrangling & Statistics', 20),
+('da_01', 'SQL Rolling Averages & Cumulative Metric Tracking', 'Technical', 'Medium', 'Construct SQL queries calculating 7-day rolling revenue averages and year-to-date cumulative customer expenditures using window frame clauses.', 'data_analyst', 'Advanced SQL', 20),
+('da_02', 'Customer Cohort Retention & Churn Analysis', 'Technical', 'Easy', 'Construct monthly user cohort retention matrices from subscription events and calculate lifetime churn rates for executive performance reviews.', 'data_analyst', 'Business Analytics', 20),
+('da_03', 'Exploratory Data Analysis & Visual Distribution Skew', 'Technical', 'Easy', 'Interpret boxplots, interquartile ranges (IQR), and distribution histograms to detect multi-modal clustering and outlier boundaries.', 'data_analyst', 'Data Visualization', 20),
+
+-- === CLOUD & DEVOPS ENGINEER (cloud_engineer) ===
+('cloud_01', 'Docker Containerization & Multi-Stage Builds', 'Technical', 'Easy', 'Optimize Dockerfile layer caching and reduce production image size by separating build tools from minimal runtime alpine images.', 'cloud_engineer', 'Containers & CI/CD', 20),
+('cloud_02', 'Kubernetes Pod Auto-Scaling & Load Balancing', 'Technical', 'Medium', 'Configure Horizontal Pod Autoscaler (HPA) metric targets and evaluate Ingress controller path-based routing rules.', 'cloud_engineer', 'Cloud Orchestration', 20),
+('cloud_03', 'Linux Administration & Graceful Process Signals', 'Technical', 'Easy', 'Manage systemd service units, inspect zombie processes, and configure graceful SIGTERM vs forceful SIGKILL application shutdown sequences.', 'cloud_engineer', 'Linux Fundamentals', 20),
+('cloud_04', 'VPC Subnetting & High-Availability Network Design', 'Technical', 'Medium', 'Design public and private subnets with NAT Gateways, Internet Gateways, and Route Tables for multi-tier fault-tolerant cloud architecture.', 'cloud_engineer', 'Cloud Networking', 20),
+('cloud_05', 'CI/CD Pipeline Automation & Blue-Green Traffic Shifting', 'Technical', 'Medium', 'Configure automated build validation, container image vulnerability scanning, and zero-downtime blue-green traffic cutovers via reverse proxies.', 'cloud_engineer', 'DevOps & CI/CD', 20),
+
+-- === CYBERSECURITY ANALYST (cyber_analyst) ===
+('cyber_01', 'OWASP Top 10: SQL Injection & XSS Defense', 'Technical', 'Medium', 'Analyze vulnerable code snippets and remediate through parameterized queries and context-aware output encoding.', 'cyber_analyst', 'Application Security', 20),
+('cyber_02', 'Public Key Infrastructure (PKI) & TLS Handshake', 'Technical', 'Medium', 'Trace TLS 1.3 key exchange, asymmetric certificate validation, and ephemeral symmetric session key generation.', 'cyber_analyst', 'Cryptography & Network Security', 20),
+('cyber_03', 'Network Traffic Forensics & Packet Inspection', 'Technical', 'Medium', 'Analyze Wireshark packet captures to detect TCP SYN flood attacks, DNS tunneling exfiltration, and unencrypted credential transmission.', 'cyber_analyst', 'Network Forensics', 20),
+('cyber_04', 'Role-Based Access Control (RBAC) & OAuth 2.0 Flow', 'Technical', 'Easy', 'Contrast authorization code grant with client credentials grant, and structure principle-of-least-privilege RBAC role mappings.', 'cyber_analyst', 'Identity & Access Management', 20),
+('cyber_05', 'Incident Response Playbook & SIEM IoC Correlation', 'Technical', 'Hard', 'Formulate containment, eradication, and post-incident review procedures using correlated SIEM log event indicators of compromise (IoCs).', 'cyber_analyst', 'Security Operations', 20),
+
+-- === UI/UX DESIGNER (uiux_designer) ===
+('uiux_01', 'WCAG 2.1 AA Contrast Ratio & Touch Sizing', 'Technical', 'Easy', 'Calculate visual luminance contrast ratios for normal vs large text and verify touch target boundary compliance (48x48 dp).', 'uiux_designer', 'Accessibility & Inclusive Design', 20),
+('uiux_02', 'Information Architecture & Card Sorting Analysis', 'Technical', 'Medium', 'Structure navigation taxonomy for a multi-service portal based on open vs closed card sorting agreement matrices.', 'uiux_designer', 'Information Architecture', 20),
+('uiux_03', 'Usability Testing & System Usability Scale (SUS)', 'Technical', 'Easy', 'Calculate standard SUS benchmark scores from 10-item Likert surveys and synthesize qualitative user task breakdown findings.', 'uiux_designer', 'UX Research', 20),
+('uiux_04', 'Design Systems & Responsive Modular Grid Scaling', 'Technical', 'Medium', 'Define 4px/8px modular spacing scales, semantic color token hierarchies, and responsive breakpoint transitions across mobile and desktop.', 'uiux_designer', 'Design Systems', 20),
+('uiux_05', 'Cognitive Load Reduction & Interaction Micro-States', 'Technical', 'Medium', 'Apply Hick-Hyman Law and Jakob''s Law to optimize multi-step checkout funnel completion and interactive state feedback.', 'uiux_designer', 'Interaction Design', 20),
+
+-- === GENERAL APTITUDE & COMPUTER SCIENCE FOUNDATIONS ===
+('apt_01', 'Time and Work: Alternate Work Days', 'Aptitude', 'Medium', 'A can complete a piece of work in 10 days and B can complete the same work in 15 days. They work on alternate days, starting with A on the first day. In how many days will the entire work be completed?', NULL, 'Time and Work', 20),
+('apt_02', 'Probability: Two Cards of the Same Suit', 'Aptitude', 'Easy', 'Two cards are drawn successively at random without replacement from a well-shuffled standard pack of 52 cards. What is the probability that both cards belong to the same suit?', NULL, 'Probability', 20),
+('apt_03', 'Problems on Trains: Crossing in Opposite Directions', 'Aptitude', 'Medium', 'Two trains 150 meters and 200 meters long are running on parallel tracks in opposite directions with uniform speeds of 54 km/h and 72 km/h respectively. How many seconds will they take to completely cross each other?', NULL, 'Time, Speed and Distance', 20),
+('apt_04', 'Profit and Loss: Successive Discounts', 'Aptitude', 'Easy', 'A merchant offers two successive discounts of 20% and 10% on an article marked at $500. What is the single equivalent discount percentage, and what is the final selling price?', NULL, 'Profit and Loss', 20),
+('apt_05', 'Problems on Ages: Father and Son', 'Aptitude', 'Medium', 'The ratio of present ages of a father and son is 5 : 2. In 5 years, the sum of their ages will be 80 years. What is the father''s present age?', NULL, 'Ages', 20),
+('apt_06', 'Pipes and Cisterns: Two Inflow Pipes', 'Aptitude', 'Easy', 'Pipe A can fill an empty cistern in 6 hours and Pipe B can fill it in 8 hours. If both pipes are opened together, how much time will they take to fill the cistern completely?', NULL, 'Pipes and Cisterns', 20),
+('apt_07', 'Ratio and Proportion: Mixture Dilution', 'Aptitude', 'Medium', 'In a 60-liter mixture, the ratio of milk to water is 2 : 1. How many liters of water must be added to this mixture to make the ratio 1 : 2?', NULL, 'Ratio and Proportion', 20),
+('apt_08', 'Simple Interest: Multiplication of Principal', 'Aptitude', 'Easy', 'A sum of money invested at a constant annual Simple Interest rate doubles itself in 8 years. In how many years will the principal become 4 times its original amount at the same interest rate?', NULL, 'Simple and Compound Interest', 20),
+('apt_09', 'Averages: Team Batting Average Change', 'Aptitude', 'Easy', 'The average score of 5 batsmen in a cricket match was 50 runs. When a 6th batsman''s score was included, the overall team average increased to 55 runs. How many runs did the 6th batsman score?', NULL, 'Average', 20),
+('apt_10', 'Percentages: Price Increase & Consumption Adjustment', 'Aptitude', 'Easy', 'If the market price of petrol increases by 25%, by what percentage must a motorist reduce petrol consumption so that the overall expenditure on fuel remains exactly unchanged?', NULL, 'Percentages', 20),
+('tech_01', 'Database Indexing: B+ Trees vs Hash Indexing', 'Technical', 'Medium', 'Compare disk page I/O efficiency and range query scan performance between B+ Tree hierarchy and hash buckets.', NULL, 'DBMS', 20),
+('tech_02', 'REST vs gRPC & Protocol Buffers', 'Technical', 'Medium', 'Evaluate serialization throughput and payload overhead comparing HTTP/1.1 JSON with HTTP/2 binary framing.', NULL, 'Distributed Systems', 20),
+('tech_03', 'Process Synchronization & Mutex vs Semaphore', 'Technical', 'Medium', 'Explain critical section mutual exclusion, deadlock prevention conditions, and counting semaphore mechanics in multi-threaded environments.', NULL, 'Operating Systems', 20),
+
+-- === INTERVIEW PREPARATION ===
+('iv_01', 'STAR Method: Resolving Technical Disagreements', 'Interview', 'Easy', 'When answering a behavioral interview question regarding a technical disagreement with a teammate, which framework structure produces the most persuasive, professional response?', NULL, 'Behavioral Interviews', 20),
+('iv_02', 'System Design: Mitigating Read-Heavy Database Bottlenecks', 'Interview', 'Medium', 'An e-commerce platform''s relational database experiences severe latency spikes during flash sales where 90% of requests are product catalog lookups. Which initial architectural strategy should you propose?', NULL, 'System Design', 20),
+('iv_03', 'Engineering Leadership: Communicating Technical Debt', 'Interview', 'Easy', 'How should a software engineer effectively justify allocating sprint capacity to refactor legacy code to non-technical product managers?', NULL, 'Stakeholder Management', 20),
+('iv_04', 'Site Reliability: Blameless Post-Mortem Principles', 'Interview', 'Medium', 'Following a major production outage caused by an engineer''s incorrect configuration deployment, what is the core objective of conducting a blameless post-mortem?', NULL, 'Production Operations', 20)
+
+ON CONFLICT (id) DO UPDATE SET
+    title = EXCLUDED.title,
+    category = EXCLUDED.category,
+    difficulty = EXCLUDED.difficulty,
+    description = EXCLUDED.description,
+    career_id = EXCLUDED.career_id,
+    topic = EXCLUDED.topic,
+    xp_reward = EXCLUDED.xp_reward;
+
+-- ==============================================================================
+-- SEED DATA: QUIZ QUESTIONS
+-- ==============================================================================
+INSERT INTO public.quiz_questions (id, career_id, topic, question, options, correct_index, explanation) VALUES
+
+-- === GENERAL PLACEMENT & APTITUDE ===
+('q_gen_1', NULL, 'general', 'Which data structure provides average O(1) time complexity for search, insertion, and deletion?', '["Binary Search Tree", "Hash Table", "Dynamic Array", "Linked List"]'::jsonb, 1, 'Hash Tables map keys to bucket indices using a hash function, providing average O(1) time complexity for lookup, insert, and delete operations.'),
+('q_gen_2', NULL, 'general', 'What does ACID stand for in Database Transaction Management?', '["Atomicity, Consistency, Isolation, Durability", "Accuracy, Completeness, Integrity, Dependability", "Asynchronous, Concurrent, Immutable, Distributed", "Authentication, Confidentiality, Identity, Decryption"]'::jsonb, 0, 'ACID properties ensure database transactions are processed reliably: Atomicity (all or nothing), Consistency (valid states), Isolation (concurrent executions don''t clash), Durability (persisted).'),
+('q_gen_3', NULL, 'general', 'In SQL, which clause filters aggregated grouped records produced by a GROUP BY clause?', '["WHERE", "ORDER BY", "HAVING", "QUALIFY"]'::jsonb, 2, 'The HAVING clause filters aggregated groups after GROUP BY, whereas WHERE filters individual rows prior to grouping.'),
+('q_gen_4', NULL, 'general', 'Which sorting algorithm guarantees O(N log N) worst-case time complexity?', '["Quick Sort", "Merge Sort", "Bubble Sort", "Insertion Sort"]'::jsonb, 1, 'Merge Sort always splits the dataset evenly and merges sorted halves in linear time, guaranteeing O(N log N) time complexity in worst, average, and best cases.'),
+('q_gen_5', NULL, 'general', 'If 6 men complete a project in 10 days, how many days will 15 men take to complete the same project working at identical efficiency?', '["4 days", "5 days", "6 days", "8 days"]'::jsonb, 0, 'Total work = 6 men × 10 days = 60 man-days. For 15 men: Days = 60 / 15 = 4 days.'),
+
+-- === AI / MACHINE LEARNING ENGINEER (aiml_engineer) ===
+('q_ai_1', 'aiml_engineer', 'aiml', 'What is the primary role of the Backpropagation algorithm in Deep Learning?', '["Generating synthetic data batches", "Calculating gradients of the loss function with respect to model weights", "Compressing model parameters for mobile devices", "Normalizing dataset inputs to zero mean"]'::jsonb, 1, 'Backpropagation applies the calculus chain rule recursively to compute loss gradients for each trainable weight in the network.'),
+('q_ai_2', 'aiml_engineer', 'aiml', 'Which regularization technique randomly deactivates neurons during neural network training to prevent co-adaptation?', '["Batch Normalization", "Dropout", "Early Stopping", "L1 Lasso Regularization"]'::jsonb, 1, 'Dropout randomly disables a fraction of hidden units during forward/backward passes, forcing the network to learn robust, generalized representations.'),
+('q_ai_3', 'aiml_engineer', 'aiml', 'In Natural Language Processing, what core mechanism powers Transformer architectures (like BERT and GPT)?', '["Recurrent Hidden States", "Multi-Head Self-Attention", "Convolutional Max-Pooling", "Markov Decision Chains"]'::jsonb, 1, 'Self-attention computes pairwise token compatibility scores across the entire sequence simultaneously, overcoming sequential bottlenecking in RNNs.'),
+('q_ai_4', 'aiml_engineer', 'aiml', 'What metric is most appropriate for evaluating a classification model on an extremely imbalanced dataset (e.g., 99% negative, 1% positive)?', '["Classification Accuracy", "F1-Score / Precision-Recall AUC", "Mean Squared Error", "R-Squared"]'::jsonb, 1, 'When classes are heavily skewed, raw accuracy is deceptive. Precision, Recall, and F1-Score evaluate true positive recovery without majority class bias.'),
+('q_ai_5', 'aiml_engineer', 'aiml', 'What is the key difference between Overfitting and Underfitting?', '["Overfitting has high bias; Underfitting has high variance", "Overfitting performs well on training data but poorly on test data; Underfitting performs poorly on both", "Overfitting only occurs in unsupervised models; Underfitting only occurs in neural networks", "Overfitting indicates data leakage; Underfitting indicates perfect convergence"]'::jsonb, 1, 'Overfitting memorizes noise in the training set (high variance), leading to poor generalization. Underfitting fails to capture underlying patterns (high bias).'),
+
+-- === SOFTWARE DEVELOPER (software_dev) ===
+('q_sd_1', 'software_dev', 'software_dev', 'In Object-Oriented Programming, which SOLID principle states that classes should be open for extension but closed for modification?', '["Single Responsibility Principle", "Open/Closed Principle", "Liskov Substitution Principle", "Interface Segregation Principle"]'::jsonb, 1, 'The Open/Closed Principle (OCP) advocates designing software entities such that new behavior can be added via inheritance or composition without altering existing source code.'),
+('q_sd_2', 'software_dev', 'software_dev', 'What is the space complexity of a recursive Depth-First Search on a balanced binary tree of N nodes?', '["O(1)", "O(log N)", "O(N)", "O(N log N)"]'::jsonb, 1, 'In a balanced binary tree, the maximum recursion call stack depth corresponds to tree height, which is O(log N).'),
+('q_sd_3', 'software_dev', 'software_dev', 'Which HTTP method is defined by RFC specifications as idempotent?', '["POST", "PUT", "PATCH (without precondition)", "CONNECT"]'::jsonb, 1, 'PUT is idempotent: multiple identical requests will produce the exact same server resource state as a single request.'),
+('q_sd_4', 'software_dev', 'software_dev', 'In modern database concurrency, what phenomenon occurs when a transaction reads data that was modified by an uncommitted concurrent transaction?', '["Phantom Read", "Dirty Read", "Non-repeatable Read", "Deadlock"]'::jsonb, 1, 'A Dirty Read happens when Transaction A reads changes written by Transaction B before Transaction B commits; if B rolls back, A holds invalid data.'),
+('q_sd_5', 'software_dev', 'software_dev', 'In Kotlin / Java, what is the primary benefit of immutability in multi-threaded environments?', '["Eliminates the need for locks and prevents race conditions", "Guarantees O(1) memory consumption", "Automatically executes garbage collection immediately", "Converts all methods into asynchronous coroutines"]'::jsonb, 0, 'Immutable objects cannot be modified after construction, making them inherently thread-safe without synchronization overhead.'),
+
+-- === DATA SCIENTIST (data_scientist) ===
+('q_ds_1', 'data_scientist', 'data_scientist', 'What is the primary difference between L1 (Lasso) and L2 (Ridge) regression regularization?', '["L1 produces sparse models with feature selection; L2 shrinks coefficients smoothly without eliminating features", "L1 is only for classification; L2 is only for regression", "L1 squares the error; L2 takes absolute value of error", "L1 requires unnormalized data; L2 requires normalized data"]'::jsonb, 0, 'L1 regularization adds a penalty proportional to the absolute values of weights, driving non-informative coefficients to exactly zero (feature selection). L2 penalizes squared weights, shrinking them toward zero without eliminating features.'),
+('q_ds_2', 'data_scientist', 'data_scientist', 'In statistical hypothesis testing, what is a Type I error?', '["Failing to reject a false null hypothesis (False Negative)", "Rejecting a true null hypothesis (False Positive)", "Selecting an inadequate sample size", "Calculating an incorrect standard deviation"]'::jsonb, 1, 'A Type I error occurs when researchers reject the null hypothesis when it is actually true (false positive), with probability equal to the significance level alpha.'),
+('q_ds_3', 'data_scientist', 'data_scientist', 'Which metric measures the purity of splits in Decision Tree algorithms such as CART?', '["Root Mean Square Error", "Gini Impurity", "Cosine Similarity", "Silhouette Coefficient"]'::jsonb, 1, 'CART uses Gini Impurity (or Information Gain via Entropy) to determine the optimal feature split by quantifying class label mixing at each node.'),
+('q_ds_4', 'data_scientist', 'data_scientist', 'What does the Silhouette Coefficient measure in unsupervised clustering evaluation?', '["Model inference execution latency", "How similar an object is to its own cluster compared to neighboring clusters", "The total number of training data points", "The proportion of explained variance in linear projection"]'::jsonb, 1, 'The Silhouette Coefficient ranges from -1 to +1, measuring intra-cluster cohesion versus nearest-cluster separation; higher values indicate well-separated, dense clusters.'),
+('q_ds_5', 'data_scientist', 'data_scientist', 'What technique is used to combat the curse of dimensionality by projecting data onto orthogonal axes of maximum variance?', '["K-Nearest Neighbors", "Principal Component Analysis (PCA)", "Stratified K-Fold Cross Validation", "Markov Chain Monte Carlo"]'::jsonb, 1, 'Principal Component Analysis (PCA) performs eigendecomposition of the covariance matrix to project high-dimensional data onto orthogonal principal components maximizing explained variance.'),
+
+-- === DATA ANALYST (data_analyst) ===
+('q_da_1', 'data_analyst', 'data_analyst', 'In SQL, what is the key difference between UNION and UNION ALL?', '["UNION sorts columns; UNION ALL sorts rows", "UNION removes duplicate rows; UNION ALL retains all rows including duplicates", "UNION works across multiple databases; UNION ALL works within one table", "UNION requires identical column names; UNION ALL allows mismatched types"]'::jsonb, 1, 'UNION performs a distinct deduplication pass across combined results, whereas UNION ALL directly concatenates datasets without removing duplicates, making it faster.'),
+('q_da_2', 'data_analyst', 'data_analyst', 'Which statistical measure is LEAST sensitive to extreme outliers in a skewed numerical dataset?', '["Mean", "Median", "Standard Deviation", "Range"]'::jsonb, 1, 'The Median represents the 50th percentile rank and is robust to extreme values, unlike the Arithmetic Mean which shifts heavily with outliers.'),
+('q_da_3', 'data_analyst', 'data_analyst', 'In data visualization, which chart is most effective for displaying proportions of a whole across 3-5 categories?', '["Scatter Plot", "Donut / Stacked Bar Chart", "Box and Whisker Plot", "Line Chart"]'::jsonb, 1, 'Donut or Stacked Bar charts clearly show part-to-whole categorical compositions when the number of slices is small.'),
+('q_da_4', 'data_analyst', 'data_analyst', 'What type of JOIN returns all records from the left table and matched records from the right table, filling with NULL for unmatched rows?', '["INNER JOIN", "LEFT OUTER JOIN", "CROSS JOIN", "FULL OUTER JOIN"]'::jsonb, 1, 'LEFT OUTER JOIN preserves every row from the primary (left) table regardless of whether matching keys exist in the secondary (right) table.'),
+('q_da_5', 'data_analyst', 'data_analyst', 'What does a Pearson correlation coefficient (r) of -0.85 indicate between two business variables?', '["No linear relationship", "Strong negative linear relationship", "Weak positive relationship", "Definitive causal proof that one variable causes the other"]'::jsonb, 1, 'An r value of -0.85 indicates a strong inverse relationship where increases in one variable consistently correspond to decreases in the other.'),
+
+-- === CLOUD & DEVOPS ENGINEER (cloud_engineer) ===
+('q_cl_1', 'cloud_engineer', 'cloud_engineer', 'In Container technology, how does Docker container virtualization differ from traditional Virtual Machines (VMs)?', '["Containers include their own complete guest operating system kernel", "Containers share the host OS kernel and isolate user spaces, making them lightweight", "Containers can only run on physical bare-metal servers without hypervisors", "Containers do not support networking or persistent storage"]'::jsonb, 1, 'Docker containers share the host operating system kernel and isolate processes using cgroups and namespaces, achieving faster boot times and lower overhead than VMs.'),
+('q_cl_2', 'cloud_engineer', 'cloud_engineer', 'What is the primary benefit of "Infrastructure as Code" (IaC) tools such as Terraform or AWS CloudFormation?', '["Automates manual UI mouse clicks", "Provides version-controlled, reproducible, and automated infrastructure provisioning", "Replaces relational databases with key-value stores", "Translates Java code directly into binary assembly"]'::jsonb, 1, 'IaC enables declarative definitions of cloud infrastructure that can be versioned, tested, and reliably applied across staging and production.'),
+('q_cl_3', 'cloud_engineer', 'cloud_engineer', 'Which deployment strategy routes a small percentage (e.g. 5%) of live production traffic to a new release to test stability before full rollout?', '["Big Bang Deployment", "Canary Deployment", "Recreate Deployment", "Cold Standby"]'::jsonb, 1, 'Canary deployments expose a new software version to a small cohort of real users to detect regressions early before widespread deployment.'),
+('q_cl_4', 'cloud_engineer', 'cloud_engineer', 'In Kubernetes, what is the smallest deployable compute unit that encapsulates one or more containers?', '["Node", "Pod", "Cluster", "Service Mesh"]'::jsonb, 1, 'A Pod is the basic execution unit in Kubernetes, encapsulating one or more tightly coupled containers sharing storage and network namespaces.'),
+('q_cl_5', 'cloud_engineer', 'cloud_engineer', 'What does the "CI/CD" abbreviation stand for in DevOps engineering?', '["Continuous Infrastructure / Cloud Deployment", "Continuous Integration / Continuous Delivery (or Deployment)", "Centralized Interface / Cluster Distribution", "Code Inspection / Container Delivery"]'::jsonb, 1, 'CI/CD stands for Continuous Integration (automated build & test upon commit) and Continuous Delivery/Deployment (automated release).'),
+
+-- === CYBERSECURITY ANALYST (cyber_analyst) ===
+('q_cy_1', 'cyber_analyst', 'cyber_analyst', 'What is the core defensive measure against SQL Injection vulnerabilities in backend web applications?', '["Client-side JavaScript form validation", "Parameterized queries / Prepared Statements with Object-Relational Mappers", "Increasing database server RAM", "Using Base64 encoding on query strings"]'::jsonb, 1, 'Parameterized queries ensure user input is treated strictly as data literals rather than executable SQL code, preventing SQL injection.'),
+('q_cy_2', 'cyber_analyst', 'cyber_analyst', 'In the CIA Triad of Information Security, what does the "I" represent?', '["Identification", "Integrity", "Isolation", "Inspection"]'::jsonb, 1, 'Integrity ensures data is accurate, authentic, and protected against unauthorized tampering, modification, or deletion.'),
+('q_cy_3', 'cyber_analyst', 'cyber_analyst', 'Which type of cyber attack involves intercepting communications between two parties without their knowledge?', '["Man-in-the-Middle (MitM)", "Cross-Site Scripting (XSS)", "Buffer Overflow", "Denial of Service (DoS)"]'::jsonb, 0, 'A Man-in-the-Middle attack occurs when an attacker covertly intercepts, relays, and possibly alters communication between two nodes.'),
+('q_cy_4', 'cyber_analyst', 'cyber_analyst', 'What is the primary purpose of a Digital Certificate issued by a Certificate Authority (CA)?', '["To compress network payloads", "To bind a public key to an entity''s identity and prove server authenticity", "To block all incoming HTTP traffic", "To store user passwords in plaintext"]'::jsonb, 1, 'A digital certificate cryptographically binds a public key to an organization or domain, enabling trust and encrypted TLS connections.'),
+('q_cy_5', 'cyber_analyst', 'cyber_analyst', 'What principle states that users and applications should be granted only the minimum permissions necessary to complete their job?', '["Defense in Depth", "Principle of Least Privilege", "Security through Obscurity", "Zero Day Hardening"]'::jsonb, 1, 'The Principle of Least Privilege limits access rights for users, accounts, and processes to only those resources strictly required.'),
+
+-- === UI/UX DESIGNER (uiux_designer) ===
+('q_ux_1', 'uiux_designer', 'uiux_designer', 'According to Fitts''s Law in user interface design, the time required to rapidly move to a target area is a function of what two factors?', '["Target color and background contrast", "Target distance and target width/size", "Font size and line spacing", "Screen refresh rate and mouse DPI"]'::jsonb, 1, 'Fitts''s Law states that target acquisition speed depends on distance to the target and target size. Larger, closer interactive buttons are faster and easier to tap.'),
+('q_ux_2', 'uiux_designer', 'uiux_designer', 'What is the minimum recommended touch target size according to Android Material Design 3 and WCAG guidelines?', '["24 x 24 dp", "32 x 32 dp", "48 x 48 dp", "64 x 64 dp"]'::jsonb, 2, 'Material 3 and accessibility standards require a minimum 48x48 dp touch target boundary to prevent mis-taps on mobile devices.'),
+('q_ux_3', 'uiux_designer', 'uiux_designer', 'What is the primary objective of a "Heuristic Evaluation" conducted by UX professionals?', '["Writing production CSS stylesheets", "Evaluating an interface against recognized usability principles (e.g. Nielsen''s 10 Heuristics)", "Generating random user persona demographics", "Measuring server API response latency"]'::jsonb, 1, 'Heuristic evaluation inspects UI flows against established usability heuristics to identify user friction and design flaws systematically.'),
+('q_ux_4', 'uiux_designer', 'uiux_designer', 'Which phase in the Double Diamond design framework focuses on brainstorming and prototyping multiple potential solutions?', '["Discover", "Define", "Develop", "Deliver"]'::jsonb, 2, 'In the Double Diamond framework, Develop is the second divergence phase where teams iterate, conceptualize, and prototype creative solutions.'),
+('q_ux_5', 'uiux_designer', 'uiux_designer', 'What does WCAG 2.1 AA level require for minimum contrast ratio between normal body text and its background?', '["2.5 : 1", "3.0 : 1", "4.5 : 1", "7.0 : 1"]'::jsonb, 2, 'WCAG 2.1 AA mandates a minimum contrast ratio of 4.5:1 for normal body text and 3:1 for large text (18pt / 14pt bold).')
+
+ON CONFLICT (id) DO UPDATE SET
+    career_id = EXCLUDED.career_id,
+    topic = EXCLUDED.topic,
+    question = EXCLUDED.question,
+    options = EXCLUDED.options,
+    correct_index = EXCLUDED.correct_index,
+    explanation = EXCLUDED.explanation;
+
+-- ==============================================================================
+-- SEED DATA: INTERVIEW QUESTIONS
+-- ==============================================================================
+INSERT INTO public.interview_questions (id, career_id, category, question, answer_key, tip, topic) VALUES
+
+-- === GENERAL HR & BEHAVIORAL ===
+('iq_hr_01', NULL, 'HR', 'Tell me about yourself and your career focus in engineering.', 'Use the Present-Past-Future framework: Current degree/department, key academic achievements & engineering projects, and long-term career ambition in your target domain.', 'Keep response between 60-90 seconds. Quantify accomplishments where possible.', 'General HR'),
+('iq_hr_02', NULL, 'HR', 'Describe a situation where a technical project hit an unexpected bug before a deadline.', 'Use the STAR method (Situation, Task, Action, Result). Emphasize systematic root cause analysis, clear mentor communication, prioritization, and lessons learned.', 'Focus on accountability and constructive problem-solving rather than blaming team members.', 'Behavioral HR'),
+
+-- === SOFTWARE DEVELOPER (software_dev) ===
+('iq_tech_01', 'software_dev', 'Technical', 'Explain Database Normalization (1NF, 2NF, 3NF) and when you would intentionally denormalize.', '1NF: Atomic column values; 2NF: No partial dependency on composite keys; 3NF: No transitive dependencies. Denormalize in read-heavy analytics/reporting workloads to minimize expensive multi-table JOINs.', 'Provide a concrete schema example (e.g., Orders and Line Items).', 'Database Design'),
+('iq_sys_01', 'software_dev', 'Technical', 'Design a high-throughput URL Shortener service (e.g., bit.ly) - System Architecture.', 'Core components: API Gateway, Base62 token generator with counter service, Redis caching layer, sharded relational/NoSQL datastore, handling HTTP 301 vs 302 redirects.', 'Clarify read-to-write traffic ratios (typically 100:1 read heavy) before proposing storage sizing.', 'Distributed Systems'),
+('iq_sd_01', 'software_dev', 'Behavioral', 'Describe a challenging bug you encountered in a team codebase and how you resolved it.', 'Structure response using STAR: Situation (unreproducible concurrency deadlock in production), Task (isolate root cause without disrupting users), Action (analyzed thread dumps, added reproducible unit test, implemented reentrant lock), Result (resolved latency spike, added regression test).', 'Highlight systematic troubleshooting and proactive communication with teammates.', 'Debugging & Problem Solving'),
+('iq_sd_02', 'software_dev', 'Technical', 'What are the core architectural differences and trade-offs between Monolithic and Microservices architectures?', 'Monoliths have single deployment pipelines, shared database schemas, and simple in-memory module calls, but face scaling bottlenecks. Microservices offer autonomous deployments, polyglot persistence, and domain isolation, but introduce distributed latency, network partitions, and data consistency challenges.', 'Mention Conway''s Law and transactional consistency (e.g., Saga pattern) to show real depth.', 'System Architecture'),
+('iq_sd_03', 'software_dev', 'Scenario', 'How do you handle code reviews when a teammate submits code that doesn''t follow conventions or has potential security vulnerabilities?', 'Focus on the code rather than the person. Provide clear explanations citing documentation or architectural decision records (ADRs), offer constructive alternatives, and distinguish between critical security/functional issues vs stylistic preferences.', 'Emphasize collaboration, empathy, and mentoring rather than gatekeeping.', 'Engineering Collaboration'),
+
+-- === AI / MACHINE LEARNING ENGINEER (aiml_engineer) ===
+('iq_tech_02', 'aiml_engineer', 'Technical', 'How do you mitigate Overfitting in Deep Machine Learning models?', 'Key strategies: L1/L2 weight regularization, Dropout layers, Early Stopping based on validation loss, Data Augmentation, and cross-validation.', 'Explain the Bias-Variance tradeoff curve on a whiteboard if in person.', 'Machine Learning'),
+('iq_ai_01', 'aiml_engineer', 'Technical', 'Explain the difference between Precision and Recall. In what scenarios would you prioritize one over the other?', 'Precision = TP / (TP + FP); Recall = TP / (TP + FN). Prioritize Recall in critical medical diagnosis or malware detection where missing a true positive is catastrophic. Prioritize Precision in spam filters or video recommendation where false positives degrade user trust.', 'Mention F-beta scores (e.g. F2 score) when one metric is weighted more heavily.', 'Model Evaluation'),
+('iq_ai_02', 'aiml_engineer', 'Technical', 'How does Gradient Descent work, and what advantages do Adam and RMSprop provide over standard SGD?', 'Standard SGD updates weights in the opposite direction of loss gradients with fixed learning rate. Adam (Adaptive Moment Estimation) combines momentum (first moment: moving average of gradients) and adaptive learning rates (second moment: uncentered variance), accelerating convergence and navigating saddle points.', 'Explain how learning rate schedules and warmup prevent early divergence.', 'Optimization Algorithms'),
+('iq_ai_03', 'aiml_engineer', 'Scenario', 'Describe an end-to-end machine learning project you designed and deployed to production.', 'Present using STAR: Objective/business problem, data collection and cleaning pipeline, feature engineering, model selection and validation benchmark, deployment mechanism (e.g., FastAPI / Docker / ONNX runtime), and post-deployment monitoring for data drift.', 'Be ready to answer questions about the specific evaluation metrics and production latency constraints.', 'MLOps & System Design'),
+('iq_ai_04', 'aiml_engineer', 'Technical', 'What is Data Drift vs Concept Drift in production ML models, and how do you detect and remediate it?', 'Data drift refers to changes in the distribution of input features P(X) over time. Concept drift occurs when the mapping between features and target labels P(Y|X) changes. Detect using statistical tests (Kolmogorov-Smirnov, Population Stability Index) and remediate through automated retraining triggers and shadow deployments.', 'Cite real monitoring tools (e.g. Evidently AI, Great Expectations) for extra credibility.', 'Production Monitoring'),
+
+-- === DATA SCIENTIST (data_scientist) ===
+('iq_ds_01', 'data_scientist', 'Technical', 'Explain the Bias-Variance tradeoff and how ensemble methods address it.', 'Bias is error from erroneous assumptions (underfitting); Variance is sensitivity to fluctuations in training data (overfitting). Bagging (e.g., Random Forests) trains independent models in parallel to reduce variance without increasing bias. Boosting (e.g., XGBoost, LightGBM) trains sequential models to reduce bias iteratively.', 'Draw or describe the U-shaped total error curve as a function of model complexity.', 'Machine Learning Theory'),
+('iq_ds_02', 'data_scientist', 'Scenario', 'How do you design an A/B test for a major product feature rollout from sample sizing to decision making?', '1) Define primary metric (e.g., conversion rate) and guardrail metrics; 2) Determine sample size using baseline conversion, minimum detectable effect (MDE), significance level alpha (0.05), and power beta (0.80); 3) Randomize by user ID; 4) Check for sample ratio mismatch (SRM); 5) Compute p-value and confidence intervals before rolling out.', 'Emphasize guardrail metrics (e.g. page latency, crash rate) to prove business maturity.', 'Experimental Design & A/B Testing'),
+('iq_ds_03', 'data_scientist', 'Technical', 'What steps do you take when your dataset has severe class imbalance (e.g., 99.5% negative)?', '1) Never use raw accuracy; use PR-AUC, F1-score, and cost-sensitive loss; 2) Apply resampling techniques like SMOTE or stratified subsampling on training data only; 3) Use ensemble models like Balanced Random Forest or focal loss; 4) Calibrate decision thresholds according to business misclassification costs.', 'Stress that resampling must NEVER be applied to validation or test sets to prevent data leakage.', 'Data Wrangling & Modeling'),
+('iq_ds_04', 'data_scientist', 'Behavioral', 'Describe a situation where a stakeholder pushed for an analytical conclusion not supported by the data.', 'STAR response: Acknowledge business goals, present objective data distributions and confidence intervals clearly with visual charts, walk through alternative hypotheses, and suggest a pilot experiment to test their intuition safely without misrepresenting facts.', 'Demonstrate integrity, objective communication, and empathy toward business pressures.', 'Stakeholder Management'),
+('iq_ds_05', 'data_scientist', 'Technical', 'How do you handle multicollinearity among predictor variables in regression analysis?', 'Detect using Variance Inflation Factor (VIF > 5 or 10) and correlation heatmaps. Remediate by dropping redundant features, combining collinear features into a composite index, applying dimensionality reduction (PCA), or using L2 Ridge regularization which stabilizes weight estimates.', 'Explain how multicollinearity inflates standard errors of coefficients without affecting overall model predictive power.', 'Statistical Modeling'),
+
+-- === DATA ANALYST (data_analyst) ===
+('iq_da_01', 'data_analyst', 'Technical', 'What are Window Functions in SQL, and how do they differ from GROUP BY?', 'GROUP BY collapses multiple rows into a single aggregated summary row. Window functions (OVER clause) perform calculations across a set of table rows related to the current row while retaining each row''s individual identity and detail.', 'Provide examples like RANK(), DENSE_RANK(), and ROW_NUMBER() and their tie-breaking behaviors.', 'SQL & Querying'),
+('iq_da_02', 'data_analyst', 'Scenario', 'How do you identify whether a metric change is caused by seasonal trends or a genuine performance drop?', 'Decompose the time series into trend, seasonal, and residual components. Compare metrics Year-over-Year (YoY) rather than Month-over-Month (MoM) to remove annual seasonality, inspect holiday calendars, and compare performance against a stable unexposed control cohort.', 'Mention moving averages or STL time-series decomposition.', 'Trend & Seasonality Analysis'),
+('iq_da_03', 'data_analyst', 'Scenario', 'Walk me through how you would build an executive dashboard for key business performance metrics.', '1) Interview key stakeholders to define 3-5 core North Star KPIs; 2) Establish a single source of truth data pipeline; 3) Structure the visual layout hierarchically (summary KPI cards at top, trend charts in middle, drill-down tables at bottom); 4) Include clear filters (date, region, product) and automated data refresh.', 'Focus on actionable insights: every chart should help the executive make a specific operational decision.', 'Business Intelligence & Reporting'),
+('iq_da_04', 'data_analyst', 'Behavioral', 'Tell me about a time you found an error or discrepancy in a critical business report.', 'STAR response: Identified discrepancy during routine data validation, notified report owners immediately with scope of impact, traced root cause to upstream ETL schema change, implemented automated anomaly checks, and reissued updated numbers with transparent audit notes.', 'Highlight attention to detail and accountability.', 'Data Quality & Integrity'),
+('iq_da_05', 'data_analyst', 'Technical', 'Explain the difference between Correlation and Causation with a practical business example.', 'Correlation means two variables change together; Causation means change in one directly causes change in the other. Example: Marketing email clicks may correlate with high customer purchases simply because loyal customers open more emails (omitted variable: customer brand loyalty), not necessarily because the email caused the purchase. Proving causation requires controlled A/B testing.', 'Mention confounding variables and Simpson''s Paradox.', 'Analytical Reasoning'),
+
+-- === CLOUD & DEVOPS ENGINEER (cloud_engineer) ===
+('iq_cl_01', 'cloud_engineer', 'Technical', 'Explain the difference between Horizontal and Vertical scaling and when to choose each.', 'Vertical scaling (scaling up) increases CPU/RAM of an existing instance; simple to implement but has hard physical limits and single-point-of-failure risk. Horizontal scaling (scaling out) adds more instance nodes behind a load balancer; provides elasticity, fault tolerance, and near-limitless scale, but requires stateless application architecture.', 'Mention session state offloading to Redis/Memcached to enable horizontal scaling.', 'Cloud Architecture'),
+('iq_cl_02', 'cloud_engineer', 'Technical', 'How do Kubernetes Services route traffic to Pods, and what is the difference between ClusterIP, NodePort, and LoadBalancer?', 'Kubernetes uses label selectors to dynamically map Service endpoints to Pod IPs. ClusterIP exposes the Service on an internal cluster-only virtual IP. NodePort exposes the Service on each Node''s static port. LoadBalancer provisions an external cloud provider load balancer (e.g. AWS ALB, GCP Load Balancer) that routes to the NodePort/ClusterIP.', 'Mention kube-proxy and iptables/IPVS rules that perform the actual packet translation.', 'Container Orchestration'),
+('iq_cl_03', 'cloud_engineer', 'Scenario', 'Describe how you would design a secure, zero-downtime CI/CD deployment pipeline.', '1) Source trigger with branch protections and secret scanning; 2) Automated unit/lint tests in isolated runner; 3) Multi-stage Docker build with vulnerability scanning (Trivy/Snyk); 4) Push to private registry; 5) Blue-Green or Canary rollout to Kubernetes; 6) Automated smoke tests and health checks; 7) Automatic rollback on elevated error rates.', 'Emphasize security gates (static analysis, dependency checks) integrated directly into the pipeline.', 'DevOps & CI/CD'),
+('iq_cl_04', 'cloud_engineer', 'Behavioral', 'Tell me about a production outage or critical infrastructure failure you responded to.', 'STAR response: High latency alert triggered by monitoring (Prometheus/PagerDuty), joined incident bridge, inspected Grafana dashboards and Kubernetes pod restarts, identified connection pool exhaustion, scaled replicas and adjusted DB pool size, communicated incident status, and conducted blameless post-mortem.', 'Demonstrate calm under pressure and blameless post-mortem culture.', 'Incident Management & SRE'),
+('iq_cl_05', 'cloud_engineer', 'Technical', 'What is Infrastructure as Code (IaC) and how do you manage drift in production environments?', 'IaC defines infrastructure declaratively in version-controlled configuration files (Terraform, CloudFormation). Drift occurs when out-of-band manual changes occur in the cloud console. Manage drift through continuous reconciliation pipelines (terraform plan in cron/CI), enforcing read-only production console access, and automated alerting on unmanaged resources.', 'Mention state locking with remote backends (e.g. S3 + DynamoDB) to prevent concurrent writes.', 'Infrastructure Automation'),
+
+-- === CYBERSECURITY ANALYST (cyber_analyst) ===
+('iq_cy_01', 'cyber_analyst', 'Technical', 'Explain the CIA Triad and give an example of a security control for each pillar.', 'Confidentiality: Data accessible only to authorized entities (Control: AES-256 encryption, access control lists). Integrity: Data is accurate and unaltered (Control: Cryptographic hashing like SHA-256, digital signatures). Availability: Systems and data accessible when needed (Control: Redundant server clusters, DDoS mitigation, regular backups).', 'Mention that security engineering often involves balancing these three pillars against usability.', 'Security Fundamentals'),
+('iq_cy_02', 'cyber_analyst', 'Scenario', 'What steps would you take immediately upon detecting suspicious lateral movement and privilege escalation in network logs?', '1) Isolate affected endpoints from network (disable NIC / segment VLAN) to prevent spread; 2) Preserve volatile memory and logs for forensic chain of custody; 3) Revoke compromised credentials and terminate active sessions; 4) Check SIEM for indicator of compromise (IoC) spread; 5) Escalate to Incident Response lead according to playbook.', 'Never immediately reboot or power off the machine, as that destroys volatile RAM forensic evidence.', 'Incident Response'),
+('iq_cy_03', 'cyber_analyst', 'Technical', 'What is the difference between an Intrusion Detection System (IDS) and an Intrusion Prevention System (IPS)?', 'An IDS is passive: it monitors traffic copies via span/tap ports and alerts administrators to suspicious patterns without modifying packets. An IPS is inline: traffic actively flows through it, enabling it to actively block, drop malicious packets, or reset TCP connections in real time.', 'Explain the risk of false positives in inline IPS causing business service disruption.', 'Network Security'),
+('iq_cy_04', 'cyber_analyst', 'Technical', 'What is Phishing, and how do you implement a defense-in-depth strategy against sophisticated spear-phishing?', 'Phishing uses deceptive social engineering to steal credentials or deliver malware. Defense-in-depth layers: 1) Technical: SPF, DKIM, DMARC email authentication, automated attachment sandboxing; 2) Identity: FIDO2/WebAuthn hardware MFA (phishing-resistant); 3) Human: Continuous interactive phishing simulations and security awareness training; 4) Endpoint: EDR monitoring.', 'Stress that SMS and OTP MFA can be intercepted by reverse proxies, so hardware keys are the gold standard.', 'Threat Analysis & Defense'),
+('iq_cy_05', 'cyber_analyst', 'Scenario', 'Describe how a Security Information and Event Management (SIEM) tool works and how you reduce alert fatigue.', 'SIEM aggregates logs from firewalls, servers, endpoints, and identity providers, normalizes them, and runs correlation rules to flag multi-vector attacks. To reduce alert fatigue: tune threshold baselines, filter known false positives, group related alerts into incidents, implement SOAR playbooks for tier-1 triage, and prioritize alerts by asset criticality.', 'Focus on signal-to-noise ratio and quantifiable triage efficiency.', 'Security Operations (SOC)'),
+
+-- === UI/UX DESIGNER (uiux_designer) ===
+('iq_ux_01', 'uiux_designer', 'Technical', 'What is the difference between Qualitative and Quantitative UX research, and how do you combine them?', 'Quantitative research answers "what" and "how many" through numerical data (analytics, completion rates, A/B test results). Qualitative research answers "why" and "how" through direct observation (interviews, usability testing, think-aloud protocols). Combine them using mixed methods: use quantitative metrics to identify drop-off funnels, and qualitative testing to uncover user reasons.', 'Use the term "triangulation" to describe validating qualitative observations with quantitative metrics.', 'UX Research Methods'),
+('iq_ux_02', 'uiux_designer', 'Technical', 'How do you design for Accessibility (a11y) to comply with WCAG standards in mobile applications?', '1) Maintain minimum color contrast ratio (4.5:1 normal text, 3:1 large text); 2) Ensure minimum touch target size (48x48 dp in Android M3); 3) Provide meaningful contentDescription for screen readers (TalkBack); 4) Support dynamic text scaling without layout truncation; 5) Do not convey information using color alone (pair with icons/text).', 'Mention testing with real screen readers (TalkBack/VoiceOver) rather than relying solely on automated linters.', 'Accessibility & Inclusive Design'),
+('iq_ux_03', 'uiux_designer', 'Scenario', 'Walk me through how you conduct a Card Sorting study to establish Information Architecture.', '1) Identify representative content items on index cards; 2) In Open Card Sorting, participants organize cards into groups and name the categories (informs taxonomy creation); 3) In Closed Card Sorting, participants sort cards into predefined categories (validates existing structure); 4) Analyze similarity matrix and dendrograms to build navigation menus.', 'Follow up card sorting with tree testing to evaluate navigation effectiveness before designing high-fidelity screens.', 'Information Architecture'),
+('iq_ux_04', 'uiux_designer', 'Behavioral', 'Tell me about a time when user feedback contradicted your initial design hypothesis.', 'STAR response: Designed an innovative swipe-based gesture interaction that felt modern during internal reviews, but usability testing revealed users struggled with discoverability and preferred standard bottom navigation tabs. Welcomed the data, iterated to familiar mental models, and observed task completion improve by 40%.', 'Demonstrate user-centric humility: "You are not the user".', 'User Centered Design'),
+('iq_ux_05', 'uiux_designer', 'Technical', 'How do you create and maintain a Scalable Design System with engineering teams?', '1) Establish design tokens (colors, typography, spacing, elevations) as the atomic foundation; 2) Build reusable component variants (buttons, inputs, cards) with states (default, hover, focus, disabled); 3) Align naming conventions 1:1 between Figma styles and Compose/CSS tokens; 4) Maintain shared documentation and governance versioning for additions.', 'Mention how design tokens bridge the communication gap between designers and developers.', 'Design Systems')
+ON CONFLICT (id) DO UPDATE SET
+    career_id = EXCLUDED.career_id,
+    category = EXCLUDED.category,
+    question = EXCLUDED.question,
+    answer_key = EXCLUDED.answer_key,
+    tip = EXCLUDED.tip,
+    topic = EXCLUDED.topic;
+
+-- ==============================================================================
+-- 7. ATOMIC PROFILE XP INCREMENT RPC FUNCTION
+-- ==============================================================================
+CREATE OR REPLACE FUNCTION public.increment_profile_xp(
+    p_user_id uuid,
+    p_amount integer
+)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_new_xp integer;
+BEGIN
+    -- 1. Security Check: Authenticated caller can only increment their own profile XP.
+    IF auth.uid() IS NULL OR auth.uid() <> p_user_id THEN
+        RAISE EXCEPTION 'Unauthorized: User can only update their own profile XP';
+    END IF;
+
+    -- 2. Input Validation: Strictly positive amount.
+    IF p_amount IS NULL OR p_amount <= 0 THEN
+        RAISE EXCEPTION 'Invalid XP amount: Amount must be strictly greater than zero';
+    END IF;
+
+    -- 3. Atomic Database Increment.
+    UPDATE public.profiles
+    SET
+        xp = COALESCE(xp, 0) + p_amount,
+        updated_at = now()
+    WHERE id = p_user_id
+    RETURNING xp INTO v_new_xp;
+
+    -- 4. Profile existence check.
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Profile not found for user %', p_user_id;
+    END IF;
+
+    RETURN v_new_xp;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.increment_profile_xp(uuid, integer) TO authenticated;
+
+-- ==============================================================================
+-- 8. ATOMIC PRACTICE PROBLEM COMPLETION RPC FUNCTION
+-- ==============================================================================
+CREATE OR REPLACE FUNCTION public.complete_practice_problem_v2(
+    p_user_id uuid,
+    p_problem_id text,
+    p_xp_reward integer DEFAULT 20
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    v_caller_id uuid;
+    v_canonical_id text;
+    v_xp_reward integer;
+    v_already_solved boolean;
+    v_current_xp integer;
+    v_new_xp integer;
+BEGIN
+    -- 1. Security Check: Authenticated caller can only submit for their own user_id
+    v_caller_id := auth.uid();
+    IF v_caller_id IS NOT NULL AND v_caller_id <> p_user_id THEN
+        RAISE EXCEPTION 'Unauthorized: User can only complete problems for their own profile';
+    END IF;
+
+    -- 2. Canonical problem validation & alias mapping
+    v_canonical_id := CASE p_problem_id
+        WHEN 'p1' THEN 'dsa_01'
+        WHEN 'p2' THEN 'dsa_02'
+        WHEN 'p3' THEN 'dsa_03'
+        WHEN 'p4' THEN 'dsa_04'
+        WHEN 'p5' THEN 'dsa_05'
+        WHEN 'p6' THEN 'aiml_01'
+        WHEN 'p7' THEN 'aiml_02'
+        WHEN 'p8' THEN 'aiml_03'
+        WHEN 'p9' THEN 'aiml_04'
+        WHEN 'p10' THEN 'aiml_05'
+        ELSE p_problem_id
+    END;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM public.practice_problems WHERE id = v_canonical_id
+    ) THEN
+        RAISE EXCEPTION 'Practice problem % not found', v_canonical_id;
+    END IF;
+
+    -- Determine XP reward (standard 20 XP for practice problems)
+    v_xp_reward := COALESCE(p_xp_reward, 20);
+
+    -- 3. Profile lock & validation
+    SELECT COALESCE(xp, 0)
+    INTO v_current_xp
+    FROM public.profiles
+    WHERE id = p_user_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Profile not found';
+    END IF;
+
+    -- 4. Check existing solved state
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.user_problem_progress
+        WHERE user_id = p_user_id
+          AND (problem_id = p_problem_id OR problem_id = v_canonical_id)
+          AND is_solved = true
+    ) INTO v_already_solved;
+
+    IF v_already_solved THEN
+        -- Already completed: return 0 XP
+        RETURN jsonb_build_object(
+            'success', true,
+            'newly_solved', false,
+            'xp_awarded', 0,
+            'problem_id', v_canonical_id,
+            'total_xp', v_current_xp,
+            'message', 'Already completed'
+        );
+    END IF;
+
+    -- 5. Permanent user_problem_progress insert/upsert
+    INSERT INTO public.user_problem_progress (
+        id,
+        user_id,
+        problem_id,
+        is_solved,
+        solved_at,
+        created_at,
+        updated_at
+    ) VALUES (
+        gen_random_uuid(),
+        p_user_id,
+        v_canonical_id,
+        true,
+        now(),
+        now(),
+        now()
+    )
+    ON CONFLICT (user_id, problem_id)
+    DO UPDATE SET
+        is_solved = true,
+        solved_at = now(),
+        updated_at = now();
+
+    -- 6. Increment profile XP atomically using 2-argument signature
+    PERFORM public.increment_profile_xp(
+        p_user_id,
+        v_xp_reward
+    );
+
+    SELECT COALESCE(xp, 0)
+    INTO v_new_xp
+    FROM public.profiles
+    WHERE id = p_user_id;
+
+    -- 7. Record user activity (1-argument signature, owns streak/date logic)
+    BEGIN
+        PERFORM public.record_user_activity(p_user_id);
+    EXCEPTION WHEN OTHERS THEN
+        NULL;
+    END;
+
+    -- 8. Return JSON success
+    RETURN jsonb_build_object(
+        'success', true,
+        'newly_solved', true,
+        'xp_awarded', v_xp_reward,
+        'problem_id', v_canonical_id,
+        'total_xp', v_new_xp,
+        'message', 'First solve success'
+    );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.complete_practice_problem_v2(uuid, text, integer) TO authenticated, anon;
+
